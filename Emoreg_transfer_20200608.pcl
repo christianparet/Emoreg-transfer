@@ -1,0 +1,274 @@
+# Emotion regulation task for fMRI
+# Christian Paret, 2020, ZI Mannheim
+#
+# 3 conditions: Regulate, View/Negative picture, View/Neutral picture
+# 30 Trials
+
+###################################################
+######        DEFINITION OF VARIABLES       #######
+###################################################
+preset string ID = "Patient ID";
+preset string version = "A,B"; # two versions available (between-subject counterbalanced)
+string session = "01"; # three session-versions are available with three different picture sets
+
+########## Parameters to be set by user ###########
+###################################################
+bool ratevalence = true; # if false: only arousal rating
+int first_pulse = 5; # pulse to kick off experiment (t0)
+int tr = 2000; # MRI repitition time (need to set it to same value as scan_period in sce-file)
+int iti = 5; # ~mean iti in repetition times (TRs)
+int rating_duration = 7000;
+
+logfile.set_filename ( "sub-" + ID + "_ses-" + session + "_v-" + version + "_task-emoreg.log" );
+
+###################################################
+array <int> rating_out[2];
+array <int> cond_counter[3] = {1,1,1};
+array <int> sequence[2][30];
+double this_jitter;
+int this_cond;
+double t0_time;
+stimulus_data trial_onset;
+stimulus_data trial_offset;
+stimulus_data rating_onset;
+response_data response_onset;
+int response_counter;
+int rating_on_time;
+
+array <string> cond_code [3] = { "regulate_negative" , "view_negative" , "view_neutral" };
+
+array <int> code_list_A [3] = { 1 , 2 , 3 };
+array <int> code_list_B [3] = { 2 , 1 , 3 };
+array <int> assign_code [3];
+
+if version == "A" then
+	assign_code = code_list_A;
+elseif version == "B" then
+	assign_code = code_list_B;
+else
+	exit("No valid version identifier! Restart required.");
+end;
+
+########################################################
+#                Output Text files                     #
+######################################################## 
+output_file outfile_rating = new output_file;
+outfile_rating.open("sub-" + ID +"_ses-" + session + "_rating-emoreg.txt",0,true);
+
+if ratevalence then
+	outfile_rating.print("Condition\tPic\tArousal rating\tArousal confirmed\tValence rating\tValence confirmed");
+else
+	outfile_rating.print("Condition\tPic\tArousal rating\tArousal confirmed");
+end;
+
+# make BIDS compatible events-file
+output_file outfile_events = new output_file;
+outfile_events.open("sub-" + ID + "_ses-" + session + "_task-emoreg_events.tsv",0,true);
+outfile_events.print("onset\tduration\ttrial_type\tresponse");
+
+###################################################
+######            RATING SUBROUTINE          ######
+###################################################
+sub array <int,1> rating_sub (bitmap dimension) begin
+	response_counter = response_manager.response_data_count();
+	int exit_response = 0;
+	int end_time = clock.time()+rating_duration;
+	rating_pic.set_part(2,dimension);
+	array <int> rating_val[9]= {1,2,3,4,5,6,7,8,9};
+	rating_val.shuffle(1,9);
+	int value = rating_val[1];
+	loop int l=1 until clock.time()>end_time || exit_response==1 begin
+		bitmap rating_bmp=rating[value];
+		rating_pic.set_part(3,rating_bmp);
+		rating_trial.set_duration(end_time-clock.time());
+		rating_trial.present();
+		
+		if l==1 then
+			rating_onset = stimulus_manager.last_stimulus_data();
+			outfile_events.print("\n"+string(double(rating_onset.time())/1000-t0_time)+"\t0\trating");
+		end;		
+		
+		if response_manager.response_data_count() > response_counter then
+			
+			logfile.add_event_entry("button_press");
+			rating_event.set_event_code("refresh_scale");
+			if response_manager.last_response() == 1 && value>1 then 
+				value=value-1;
+			elseif response_manager.last_response() == 2 && value<9 then 
+				value=value+1;
+			elseif response_manager.last_response() == 3 then 
+				exit_response = 1;
+			end;
+			
+			response_onset = response_manager.last_response_data(); 
+			outfile_events.print("\n"+string(double(response_onset.time())/1000-t0_time)+"\t0\tbutton_press\t"+response_manager.last_response_label());
+			term.print("\nbutton press: "+response_manager.last_response_label());
+			response_counter = response_manager.response_data_count();
+		end;	
+		
+		l=l+1;
+	end;	
+	array <int> out [2];
+	out[1] = value;
+	out[2] = exit_response;
+	wait_until(end_time);
+	return out; 
+end;
+
+###################################################
+######             STIMULUS ARRAYS           ######
+###################################################
+# First line of sequence-arrays codes condition (1=regulate, 2=view/negative, 3=view/neutral), second codes picture number in pics-array (defined in scl-script)
+	
+array <int> sequence_A[2][30] = {
+	{ 2 , 1 , 3 , 1 , 2 , 3 , 3 , 1 , 2 , 3 , 1 , 2 , 3 , 1 , 2 , 3 , 2 , 1 , 3 , 2 , 1 , 3 , 2 , 1 , 3 , 2 , 1 , 3 , 1 , 2 },
+	{16,18,23,6,10,27,21,5,3,29,19,17,28,20,4,24,13,15,30,1,14,25,9,8,26,12,11,22,7,2}
+	};
+
+array <int> sequence_B[2][30] = {
+	{ 1 , 2 , 3 , 2 , 1 , 3 , 3 , 2 , 1 , 3 , 2 , 1 , 3 , 2 , 1 , 3 , 1 , 2 , 3 , 1 , 2 , 3 , 1 , 2 , 3 , 1 , 2 , 3 , 2 , 1 },
+	{40,36,55,34,32,52,54,46,37,58,44,45,60,43,47,59,48,31,51,38,35,53,33,42,57,39,50,56,49,41}
+	};
+
+array <int> sequence_C[2][30] = {
+	{ 2 , 1 , 3 , 2 , 1 , 3 , 2 , 1 , 3 , 2 , 3 , 1 , 2 , 3 , 1 , 1 , 3 , 2 , 3 , 1 , 2 , 3 , 2 , 1 , 3 , 1 , 2 , 3 , 1 , 2 },
+	{78,68,86,74,66,85,61,67,82,69,87,64,79,88,62,71,89,80,90,73,70,81,77,63,83,65,75,84,72,76}
+	};	
+
+if session=="01" then
+	sequence=sequence_A;
+elseif session=="02" then
+	sequence=sequence_B;
+elseif session=="03" then
+	sequence=sequence_C;
+end;
+
+# Jitter is used for optimal BOLD sampling; new trial will start after iti+0*TR, iti+0.25*TR, iti+0.5*TR, or iti+0.75*TR
+array <double> jitter_array [3][4] = { {0,0.5,0.25,0.75}, 
+													{0.75,0.25,0.5,0}, 	
+													{0.5,0,0.75,0.25} 
+												 }; # trial-onset will be delayed by X*tr
+array <int> jitter_index [3] = {1,1,1};
+
+array <int> blank_array [3][3] = { {1000,2000,3000}, 
+													  {3000,2000,1000}, 	
+													  {2000,1000,3000} 
+												   }; # delay rating onset
+array <int> blank_index [3] = {1,1,1};												
+
+###################################################
+########              EXPERIMENT          #########
+###################################################
+instruction_trial.present();
+int temp_pulse = pulse_manager.main_pulse_count(); # get current pulse; is currently temp_pulse=0	
+
+term.print("Waiting for MRI pulse ...\n");
+loop until (pulse_manager.main_pulse_count() > 0) begin # sanity check
+	if pulse_manager.main_pulse_count() > 0 then
+		term.print("RECEIVED PULSE: it is save to continue."); # will not return this message in emulation mode
+	end;
+end;
+term.print("\nContinue only if 'RECEIVED PULSE' message is displayed above!\nOtherwise, MRI-pulses will not be recorded.\nSwitch off emulation mode and restart to solve the problem.");
+
+loop int i = 1 until (pulse_manager.main_pulse_count() == temp_pulse + first_pulse) begin 
+end;
+t0_time = double(pulse_manager.main_pulse_time(pulse_manager.main_pulse_count()))/1000;
+	
+loop int j = 1 until j > 30 begin 
+	temp_pulse = pulse_manager.main_pulse_count();
+	blank_event.set_event_code("blank");
+	blank_trial.present();
+	
+	## update jitter index
+	if jitter_index[sequence[1][j]] ==4 then # if index exceeds size of jitter array ...
+		jitter_index[sequence[1][j]] = 1; #... start again with first array entry
+	else
+		jitter_index[sequence[1][j]] = jitter_index[sequence[1][j]] + 1; # otherwise move on to next jitter
+	end;
+	
+	## define onset time of next trial	
+	er_trial.set_mri_pulse(temp_pulse + iti);	
+	this_jitter = tr * jitter_array[sequence[1][j]][jitter_index[sequence[1][j]]];
+	fixcross_event.set_deltat(int(this_jitter));
+	
+	## assign stimuli to events and define event codes to be written to logfile
+	this_cond = assign_code[sequence[1][j]];
+	instr_event.set_event_code(cond_code[this_cond]+"_instr");
+	instr_pic.set_part(1,instr_array[this_cond]);
+	er_pic.set_part(1,pics[sequence[2][j]]); 
+	er_pic.set_part(2,cond_bmp_array[this_cond]); # set arrow or dot symbol
+	er_pic.set_part(3,cond_bmp_array[this_cond]);	
+	er_event.set_event_code(cond_code[this_cond]+"_pic"+string(sequence[2][j]));		
+	
+	## write event information to rating text-file
+	outfile_rating.print("\n"+cond_code[this_cond]); 
+	outfile_rating.print("\tpic"+string(sequence[2][j])); 	
+	
+	blank_event.set_event_code("trial_offset");
+	
+	## present trial
+	term.print("\n\nTrial Nr. "+string(j)+"\t"+cond_code[this_cond]);	
+	er_trial.present();	
+	blank_trial.present();
+	
+	## log event information to events.tsv	
+	trial_offset = stimulus_manager.last_stimulus_data(); # onset time of last blank_trial event
+	trial_onset = stimulus_manager.get_stimulus_data(stimulus_manager.stimulus_count()-2); # log instruction event as trial onset in events.tsv
+	outfile_events.print("\n"+string(double(trial_onset.time())/1000-t0_time)+"\t"+string(double(trial_offset.time()-trial_onset.time())/1000)+"\t"+cond_code[this_cond]);
+	
+	## control rating onset through blank_trial duration
+	blank_event.set_event_code("");
+	blank_trial.set_duration(blank_array[sequence[1][j]][blank_index[sequence[1][j]]]);
+	blank_trial.present();
+	
+	## update blank index
+	if blank_index[sequence[1][j]] ==3 then # if index exceeds size of blank array ...
+		blank_index[sequence[1][j]] = 1; #... start again with first array entry
+	else
+		blank_index[sequence[1][j]] = blank_index[sequence[1][j]] + 1; # otherwise move on to next entry
+	end;	
+				
+	## collect rating data and write to text file
+	rating_event.set_event_code("rating_arousal");
+	rating_out = rating_sub(sam_arousal);
+	term.print("\narousal rated "+string(rating_out[1]));
+	loop int k = 1 until k > 2 begin
+		outfile_rating.print("\t"+string(rating_out[k]));
+		k=k+1;
+	end;	
+		
+	if ratevalence then
+		blank_trial.set_duration(490); # present half-second blank screen for better visibility of next rating onset
+		blank_trial.present(); 
+		
+		rating_event.set_event_code("rating_valence");
+		rating_out = rating_sub(sam_valence);
+		term.print("\nvalence rated "+string(rating_out[1]));
+		loop int k = 1 until k > 2 begin
+			outfile_rating.print("\t"+string(rating_out[k]));
+			k=k+1;
+		end;		
+	end;
+	
+	## update counter variables	
+	cond_counter [sequence[1][j]] = cond_counter[sequence[1][j]] + 1;
+	j=j+1;
+	
+end;
+
+########################################################
+#               Quit this experiment                   #
+######################################################## 
+temp_pulse = pulse_manager.main_pulse_count();
+term.print("\n\nfinal pulse = "+string(temp_pulse));
+blank_trial.present();
+
+# end pulse corresponding to end of last rating identified in emulation mode: 651
+end_trial.set_mri_pulse(654); # record three more TRs (6s)
+
+end_trial.present();
+outfile_events.print("\n"+string(stimulus_manager.last_stimulus_data().time()/1000-t0_time)+"\t0\tend_screen");
+
+term.print("\nExperiment ends.");
+outfile_rating.close();
+outfile_events.close();
